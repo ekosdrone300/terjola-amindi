@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="ka">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>მეტეო სადგური — Live მონიტორინგი</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+GO:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Fira GO', sans-serif; }
+    .glass { background: rgba(30, 41, 59, 0.75); backdrop-filter: blur(12px); }
+    @keyframes spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .propeller-spin { animation: spin-slow 2s linear infinite; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen p-4 md:p-8">
+
+  <div class="max-w-7xl mx-auto space-y-8">
+    
+    <!-- ზედა პანელი (Header) -->
+    <header class="glass border border-slate-800 rounded-2xl p-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-xl">
+      <div>
+        <div class="flex items-center gap-3">
+          <h1 class="text-2xl md:text-3xl font-bold bg-gradient-to-r from-sky-400 to-emerald-400 bg-clip-text text-transparent">
+            🌤️ Smart Weather Station
+          </h1>
+          <span id="connBadge" class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+            <span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span> კავშირის შემოწმება...
+          </span>
+        </div>
+        <p class="text-sm text-slate-400 mt-1" id="lastUpdate">ბოლო პაკეტი: იტვირთება...</p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <div id="dayNightBadge" class="px-4 py-2 rounded-xl bg-slate-800/90 border border-slate-700 text-sm font-medium flex items-center gap-2">
+          ⏳ მოწმდება...
+        </div>
+        <button onclick="exportToCSV()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 transition text-sm font-semibold flex items-center gap-2 shadow-lg shadow-emerald-900/30 cursor-pointer">
+          📥 თვის არქივი (CSV)
+        </button>
+      </div>
+    </header>
+
+    <!-- LIVE სენსორების 6 ბარათი -->
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+      
+      <!-- 1. ტემპერატურა (DHT11) -->
+      <div class="glass border border-slate-800 p-6 rounded-2xl relative overflow-hidden">
+        <div class="flex justify-between items-start">
+          <div>
+            <p class="text-slate-400 text-sm font-medium">ტემპერატურა (DHT11)</p>
+            <div class="text-4xl font-bold mt-2 text-white"><span id="temp">--</span> °C</div>
+          </div>
+          <div class="text-3xl bg-rose-500/10 border border-rose-500/20 p-3 rounded-xl">🌡️</div>
+        </div>
+        <div class="w-full bg-slate-800 h-2 rounded-full mt-5 overflow-hidden">
+          <div id="tempBar" class="bg-gradient-to-r from-sky-400 via-amber-400 to-rose-500 h-full transition-all duration-500" style="width: 0%"></div>
+        </div>
+        <p class="text-xs text-slate-400 mt-2" id="tempStatus">სტატუსი იტვირთება...</p>
+      </div>
+
+      <!-- 2. ტენიანობა (DHT11) -->
+      <div class="glass border border-slate-800 p-6 rounded-2xl relative overflow-hidden">
+        <div class="flex justify-between items-start">
+          <div>
+            <p class="text-slate-400 text-sm font-medium">ჰაერის ტენიანობა (DHT11)</p>
+            <div class="text-4xl font-bold mt-2 text-sky-400"><span id="hum">--</span> %</div>
+          </div>
+          <div class="text-3xl bg-sky-500/10 border border-sky-500/20 p-3 rounded-xl">💧</div>
+        </div>
+        <div class="w-full bg-slate-800 h-2 rounded-full mt-5 overflow-hidden">
+          <div id="humBar" class="bg-sky-400 h-full transition-all duration-500" style="width: 0%"></div>
+        </div>
+        <p class="text-xs text-slate-400 mt-2" id="humStatus">სტატუსი იტვირთება...</p>
+      </div>
+
+      <!-- 3. ქარის სიჩქარე (IR პროპელერი) -->
+      <div class="glass border border-slate-800 p-6 rounded-2xl relative overflow-hidden">
+        <div class="flex justify-between items-start">
+          <div>
+            <p class="text-slate-400 text-sm font-medium">ქარის სიჩქარე (ანემომეტრი)</p>
+            <div class="text-4xl font-bold mt-2 text-emerald-400"><span id="wind">--</span> <span class="text-xl font-normal">კმ/სთ</span></div>
+          </div>
+          <div id="propIcon" class="text-3xl bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl">🌀</div>
+        </div>
+        <div class="flex justify-between items-center mt-5 text-sm">
+          <span class="text-slate-400">პროპელერის ბრუნი:</span>
+          <span class="font-semibold text-emerald-300 bg-emerald-950/60 px-2.5 py-0.5 rounded-lg border border-emerald-800"><span id="rpm">0</span> RPM</span>
+        </div>
+      </div>
+
+      <!-- 4. ჰაერის ხარისხი (MQ135) -->
+      <div class="glass border border-slate-800 p-6 rounded-2xl relative overflow-hidden">
+        <div class="flex justify-between items-start">
+          <div>
+            <p class="text-slate-400 text-sm font-medium">ჰაერის სისუფთავე (MQ135)</p>
+            <div class="text-4xl font-bold mt-2 text-teal-400"><span id="airQuality">--</span> %</div>
+          </div>
+          <div class="text-3xl bg-teal-500/10 border border-teal-500/20 p-3 rounded-xl">🍃</div>
+        </div>
+        <div class="w-full bg-slate-800 h-2 rounded-full mt-5 overflow-hidden">
+          <div id="airBar" class="bg-teal-400 h-full transition-all duration-500" style="width: 0%"></div>
+        </div>
+        <p class="text-xs text-slate-400 mt-2">ანალოგური მაჩვენებელი (A0): <span id="mq135Raw" class="text-slate-200 font-semibold">--</span> / 1024</p>
+      </div>
+
+      <!-- 5. წვიმის სენსორი -->
+      <div class="glass border border-slate-800 p-6 rounded-2xl flex flex-col justify-between">
+        <div class="flex justify-between items-start">
+          <div>
+            <p class="text-slate-400 text-sm font-medium">ნალექის დეტექტორი</p>
+            <div class="text-3xl font-bold mt-2" id="rain">--</div>
+          </div>
+          <div class="text-3xl bg-indigo-500/10 border border-indigo-500/20 p-3 rounded-xl">🌧️</div>
+        </div>
+        <p class="text-xs text-slate-400 mt-5" id="rainDesc">ზედაპირის სისველის მონიტორინგი</p>
+      </div>
+
+      <!-- 6. მხუთავი აირი CO (MQ7) -->
+      <div id="mq7Card" class="glass border border-slate-800 p-6 rounded-2xl flex flex-col justify-between transition-all">
+        <div class="flex justify-between items-start">
+          <div>
+            <p class="text-slate-400 text-sm font-medium">მხუთავი აირი CO (MQ7)</p>
+            <div class="text-3xl font-bold mt-2" id="mq7">--</div>
+          </div>
+          <div class="text-3xl bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl">⚠️</div>
+        </div>
+        <p class="text-xs text-slate-400 mt-5">CO კონცენტრაციის ზღვრული კონტროლი</p>
+      </div>
+
+    </section>
+
+    <!-- LIVE გრაფიკები -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="glass border border-slate-800 p-6 rounded-2xl">
+        <h3 class="text-base font-semibold text-slate-300 mb-4">📈 ტემპერატურა და ტენიანობა (დინამიკა)</h3>
+        <canvas id="tempHumChart" height="200"></canvas>
+      </div>
+      <div class="glass border border-slate-800 p-6 rounded-2xl">
+        <h3 class="text-base font-semibold text-slate-300 mb-4">💨 ქარის სიჩქარე და ჰაერის ხარისხი</h3>
+        <canvas id="windAirChart" height="200"></canvas>
+      </div>
+    </section>
+
+    <!-- თვის შემაჯამებელი ანალიტიკა -->
+    <section>
+      <h2 class="text-xl font-bold text-amber-400 mb-4 flex items-center gap-2">📊 თვის შემაჯამებელი სტატისტიკა</h2>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div class="glass p-4 rounded-xl border border-slate-800">
+          <p class="text-xs text-slate-400">საშუალო ტემპერატურა</p>
+          <p class="text-2xl font-bold text-white mt-1"><span id="avgTemp">--</span> °C</p>
+        </div>
+        <div class="glass p-4 rounded-xl border border-slate-800">
+          <p class="text-xs text-slate-400">მაქს. ტემპერატურა</p>
+          <p class="text-2xl font-bold text-rose-400 mt-1"><span id="maxTemp">--</span> °C</p>
+        </div>
+        <div class="glass p-4 rounded-xl border border-slate-800">
+          <p class="text-xs text-slate-400">მინ. ტემპერატურა</p>
+          <p class="text-2xl font-bold text-sky-400 mt-1"><span id="minTemp">--</span> °C</p>
+        </div>
+        <div class="glass p-4 rounded-xl border border-slate-800">
+          <p class="text-xs text-slate-400">მაქს. ქარის სიჩქარე</p>
+          <p class="text-2xl font-bold text-emerald-400 mt-1"><span id="maxWind">--</span> კმ/სთ</p>
+        </div>
+        <div class="glass p-4 rounded-xl border border-slate-800 col-span-2 md:col-span-1">
+          <p class="text-xs text-slate-400">წვიმიანი ჩანაწერები</p>
+          <p class="text-2xl font-bold text-indigo-400 mt-1"><span id="rainCount">--</span></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- არქივის ცხრილი -->
+    <section class="glass rounded-2xl border border-slate-800 overflow-hidden">
+      <div class="p-5 border-b border-slate-800 flex justify-between items-center">
+        <h3 class="font-semibold text-slate-200">🕒 ბოლო ჩანაწერების ჟურნალი (History)</h3>
+        <span class="text-xs text-slate-400" id="totalLogs">სულ: 0 ჩანაწერი</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-slate-900/70 text-slate-400">
+            <tr>
+              <th class="p-3.5">დრო</th>
+              <th class="p-3.5">ტემპერატურა</th>
+              <th class="p-3.5">ტენიანობა</th>
+              <th class="p-3.5">ქარი (RPM)</th>
+              <th class="p-3.5">ნალექი</th>
+              <th class="p-3.5">ჰაერი (MQ135)</th>
+              <th class="p-3.5">CO (MQ7)</th>
+              <th class="p-3.5">პერიოდი</th>
+            </tr>
+          </thead>
+          <tbody id="historyTable" class="divide-y divide-slate-800/70"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    // შენი Firebase ბაზის მისამართი:
+    const FIREBASE_URL = "https://amindi-1919f-default-rtdb.europe-west1.firebasedatabase.app";
+    let allHistoryRecords = [];
+    let lastTimestampStr = "";
+    let lastPacketTime = Date.now();
+
+    // გრაფიკების ინიციალიზაცია
+    const tempHumCtx = document.getElementById('tempHumChart').getContext('2d');
+    const tempHumChart = new Chart(tempHumCtx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          { label: 'ტემპერატურა (°C)', data: [], borderColor: '#fb7185', backgroundColor: 'rgba(251,113,133,0.1)', tension: 0.3, fill: true },
+          { label: 'ტენიანობა (%)', data: [], borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.1)', tension: 0.3, fill: true }
+        ]
+      },
+      options: { responsive: true, plugins: { legend: { labels: { color: '#cbd5e1' } } }, scales: { x: { ticks: { color: '#64748b' } }, y: { ticks: { color: '#64748b' } } } }
+    });
+
+    const windAirCtx = document.getElementById('windAirChart').getContext('2d');
+    const windAirChart = new Chart(windAirCtx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          { label: 'ქარი (კმ/სთ)', data: [], borderColor: '#34d399', tension: 0.3 },
+          { label: 'ჰაერის სისუფთავე (%)', data: [], borderColor: '#2dd4bf', tension: 0.3 }
+        ]
+      },
+      options: { responsive: true, plugins: { legend: { labels: { color: '#cbd5e1' } } }, scales: { x: { ticks: { color: '#64748b' } }, y: { ticks: { color: '#64748b' } } } }
+    });
+
+    async function fetchLiveWeather() {
+      try {
+        // 1. Live მონაცემების წამოღება
+        const curRes = await fetch(`${FIREBASE_URL}/weather/current.json`);
+        const cur = await curRes.json();
+
+        if (cur) {
+          // კავშირის სტატუსის შემოწმება
+          if (cur.timestamp !== lastTimestampStr) {
+            lastTimestampStr = cur.timestamp;
+            lastPacketTime = Date.now();
+          }
+          const isOnline = (Date.now() - lastPacketTime) < 20000; // თუ 20 წამზე მეტია არ განახლებულა
+          const connBadge = document.getElementById('connBadge');
+          if (isOnline) {
+            connBadge.className = "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+            connBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span> LIVE კავშირზეა';
+          } else {
+            connBadge.className = "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30";
+            connBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-rose-400"></span> კავშირი დაყოვნდა';
+          }
+
+          // ტემპერატურა და ტენიანობა
+          document.getElementById('temp').innerText = cur.temperature;
+          document.getElementById('hum').innerText = cur.humidity;
+          document.getElementById('tempBar').style.width = `${Math.min(Math.max((cur.temperature + 10) * 2, 5), 100)}%`;
+          document.getElementById('humBar').style.width = `${cur.humidity}%`;
+          document.getElementById('tempStatus').innerText = cur.temperature > 28 ? "🔥 ცხელა" : (cur.temperature < 10 ? "❄️ ცივა" : "✅ კომფორტული ტემპერატურა");
+          document.getElementById('humStatus').innerText = cur.humidity > 75 ? "💦 მაღალი ტენიანობა" : "👌 ნორმალური ტენიანობა";
+
+          // ქარი და პროპელერის ანიმაცია
+          document.getElementById('wind').innerText = cur.windSpeed;
+          document.getElementById('rpm').innerText = cur.rpm;
+          const propIcon = document.getElementById('propIcon');
+          if (cur.rpm > 0) {
+            propIcon.classList.add('propeller-spin');
+          } else {
+            propIcon.classList.remove('propeller-spin');
+          }
+
+          // ჰაერის ხარისხი (MQ135)
+          document.getElementById('airQuality').innerText = cur.airQuality;
+          document.getElementById('mq135Raw').innerText = cur.mq135;
+          document.getElementById('airBar').style.width = `${cur.airQuality}%`;
+
+          // წვიმა
+          document.getElementById('rain').innerHTML = cur.isRaining 
+            ? '<span class="text-sky-400">🌧️ წვიმს</span>' 
+            : '<span class="text-emerald-400">☀️ უნალექო</span>';
+          document.getElementById('rainDesc').innerText = cur.isRaining ? "სენსორზე დაფიქსირდა წყლის წვეთები" : "სენსორის ზედაპირი მშრალია";
+
+          // CO (MQ7)
+          const mq7Card = document.getElementById('mq7Card');
+          if (cur.mq7Alert) {
+            document.getElementById('mq7').innerHTML = '<span class="text-rose-500 animate-pulse">🚨 საშიში CO!</span>';
+            mq7Card.className = "glass border-2 border-rose-500 bg-rose-950/30 p-6 rounded-2xl flex flex-col justify-between";
+          } else {
+            document.getElementById('mq7').innerHTML = '<span class="text-emerald-400">✅ სუფთაა</span>';
+            mq7Card.className = "glass border border-slate-800 p-6 rounded-2xl flex flex-col justify-between";
+          }
+
+          // დღე / ღამე
+          document.getElementById('dayNightBadge').innerHTML = cur.isDay 
+            ? '☀️ <span class="text-amber-300">დღის რეჟიმი (ნათელია)</span>' 
+            : '🌙 <span class="text-indigo-300">ღამის რეჟიმი (ბნელა)</span>';
+
+          document.getElementById('lastUpdate').innerText = `ბოლო განახლება: ${cur.timestamp}`;
+        }
+
+        // 2. ისტორიისა და სტატისტიკის წამოღება
+        const histRes = await fetch(`${FIREBASE_URL}/weather/history.json`);
+        const histData = await histRes.json();
+
+        if (histData) {
+          const records = Object.values(histData);
+          allHistoryRecords = records;
+          document.getElementById('totalLogs').innerText = `სულ: ${records.length} ჩანაწერი`;
+
+          let sumTemp = 0, maxT = -999, minT = 999, maxW = 0, rainHits = 0;
+
+          records.forEach(r => {
+            const t = Number(r.temperature || 0);
+            const w = Number(r.windSpeed || 0);
+            sumTemp += t;
+            if (t > maxT) maxT = t;
+            if (t < minT) minT = t;
+            if (w > maxW) maxW = w;
+            if (r.isRaining) rainHits++;
+          });
+
+          document.getElementById('avgTemp').innerText = (sumTemp / records.length).toFixed(1);
+          document.getElementById('maxTemp').innerText = maxT === -999 ? '--' : maxT;
+          document.getElementById('minTemp').innerText = minT === 999 ? '--' : minT;
+          document.getElementById('maxWind').innerText = maxW;
+          document.getElementById('rainCount').innerText = `${rainHits} (${Math.round((rainHits / records.length) * 100)}%)`;
+
+          // გრაფიკების განახლება (ბოლო 20 ჩანაწერი)
+          const recent20 = records.slice(-20);
+          tempHumChart.data.labels = recent20.map(r => (r.timestamp || '').split(' ')[1] || '');
+          tempHumChart.data.datasets[0].data = recent20.map(r => r.temperature);
+          tempHumChart.data.datasets[1].data = recent20.map(r => r.humidity);
+          tempHumChart.update();
+
+          windAirChart.data.labels = recent20.map(r => (r.timestamp || '').split(' ')[1] || '');
+          windAirChart.data.datasets[0].data = recent20.map(r => r.windSpeed);
+          windAirChart.data.datasets[1].data = recent20.map(r => r.airQuality);
+          windAirChart.update();
+
+          // ცხრილის განახლება (ბოლო 20 ჩანაწერი)
+          const tbody = document.getElementById('historyTable');
+          tbody.innerHTML = '';
+          records.slice(-20).reverse().forEach(r => {
+            tbody.innerHTML += `
+              <tr class="hover:bg-slate-800/40 transition">
+                <td class="p-3.5 text-slate-400 font-mono text-xs">${r.timestamp || '-'}</td>
+                <td class="p-3.5 font-semibold text-white">${r.temperature} °C</td>
+                <td class="p-3.5 text-sky-400">${r.humidity} %</td>
+                <td class="p-3.5 text-emerald-400">${r.windSpeed} კმ/სთ <span class="text-xs text-slate-500">(${r.rpm} RPM)</span></td>
+                <td class="p-3.5">${r.isRaining ? '<span class="text-sky-400">🌧️ წვიმა</span>' : '<span class="text-slate-400">☀️ მშრალი</span>'}</td>
+                <td class="p-3.5 text-teal-400">${r.airQuality}% <span class="text-xs text-slate-500">(${r.mq135})</span></td>
+                <td class="p-3.5">${r.mq7Alert ? '<span class="text-rose-400 font-bold">🚨 მაღალი</span>' : '<span class="text-emerald-400">ნორმა</span>'}</td>
+                <td class="p-3.5">${r.isDay ? '☀️ დღე' : '🌙 ღამე'}</td>
+              </tr>`;
+          });
+        }
+      } catch (err) {
+        console.error("შეცდომა მონაცემების წამოღებისას:", err);
+      }
+    }
+
+    // თვის მონაცემების Excel (CSV) ფაილად გადმოწერა
+    function exportToCSV() {
+      if (!allHistoryRecords.length) {
+        alert("არქივი ჯერ ცარიელია!");
+        return;
+      }
+      let csv = "\uFEFFდრო,ტემპერატურა (C),ტენიანობა (%),ქარის სიჩქარე (კმ/სთ),RPM,ჰაერის ხარისხი (%),MQ135 Raw,წვიმა,CO საფრთხე,დღე/ღამე\n";
+      allHistoryRecords.forEach(r => {
+        csv += `"${r.timestamp}",${r.temperature},${r.humidity},${r.windSpeed},${r.rpm},${r.airQuality},${r.mq135},${r.isRaining ? 'კი' : 'არა'},${r.mq7Alert ? 'საშიში' : 'ნორმა'},${r.isDay ? 'დღე' : 'ღამე'}\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Amindi_Report_${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+    }
+
+    fetchLiveWeather();
+    setInterval(fetchLiveWeather, 3000); // განახლება ყოველ 3 წამში
+  </script>
+</body>
+</html>
